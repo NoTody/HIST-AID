@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore")
 core_mimiciv_path = './mimic-iv-2.2/'
 
 # Define MIMIC IV Image Data Location (usually external drive)
-core_mimiciv_imgcxr_path = '/gpfs/data/denizlab/Datasets/Public/physionet.org/files/mimic-cxr/2.0.0/'
+core_mimiciv_imgcxr_path = './mimic-cxr/2.0.0/'
 
 # BUILD DATAFRAME OF IMAGES AND NOTES FOR MIMIC-IV CXR
 def build_mimic_cxr_jpg_dataframe(core_mimiciv_imgcxr_path, do_save=False):

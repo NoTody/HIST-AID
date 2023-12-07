@@ -1,6 +1,9 @@
 # Temporal-MIMIC
-This repo contains code for generating time-series radiology images and reports data by linking MIMIC-CXR and 
+This repository contains code for generating time-series radiology images and reports data by linking MIMIC-CXR and 
 MIMIC-IV with train/evaluation code for aggregating and fusing representations from both modalities.
+
+## Dependencies
+Check requirements.txt for dependencies of this repository.
 
 ## Generation Dataset
 Following README in [Generation Dataset](./data_generation) to generate dataset.

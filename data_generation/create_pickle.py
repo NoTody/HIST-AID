@@ -7,13 +7,13 @@ from MIMIC_IV_HAIM_API import *
 core_mimiciv_path = './mimic-iv-2.2-v2/'
 
 # Define MIMIC IV Note Data Location
-core_mimiciv_note_path = '/gpfs/data/denizlab/Users/hh2740/mimic-iv-note-deidentified-free-text-clinical-notes-2.2/'
+core_mimiciv_note_path = './mimic-iv-note-deidentified-free-text-clinical-notes-2.2/'
 
 # Define MIMIC IV Image Data Location (usually external drive)
-core_mimiciv_imgcxr_path = '/gpfs/data/denizlab/Datasets/Public/physionet.org/files/mimic-cxr-jpg/2.0.0/'
+core_mimiciv_imgcxr_path = './Public/physionet.org/files/mimic-cxr-jpg/2.0.0/'
 
 # Define mimic-cxr note location
-mimic_cxr_note_path = '/gpfs/data/denizlab/Users/hh2740/ehr_multimodal/HAIM_cp/mimic-iv-2.2/mimic-cxr-2.0.0-jpeg-txt.csv'
+mimic_cxr_note_path = './mimic-iv-2.2/mimic-cxr-2.0.0-jpeg-txt.csv'
 df_mimic_cxr = pd.read_csv(mimic_cxr_note_path)
 
 # create pickle file folder
