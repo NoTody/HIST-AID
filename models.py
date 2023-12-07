@@ -198,7 +198,7 @@ class bert_model(nn.Module):
     
     
 class mm_model(nn.Module):
-    def __init__(self, args, features_dim, out_size, method='average', fusion_method='MCB',
+    def __init__(self, args, features_dim, out_size, method='average', fusion_method='Block',
                  pool='cls', lock=False, use_time=False, pos_encoding='learnable', img_max_len=5, 
                  text_max_len=50, pretrained='hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224',
                  ):
@@ -263,7 +263,7 @@ class mm_model(nn.Module):
             self.classifier = nn.Sequential(
                 nn.Linear(d_model, out_size),
             )
-        elif self.img_time_series and self.text_time_series:
+        elif self.img_time_series or self.text_time_series:
             self.classifier = nn.Sequential(
                 nn.Linear(mm_dim, out_size)
             )
