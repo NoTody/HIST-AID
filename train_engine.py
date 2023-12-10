@@ -100,24 +100,17 @@ class MIMICCXRTrainer():
             
             aurocMean, lossv = MIMICCXRTrainer.epochVal(args, model, dataLoaderVal, criterion, nnClassCount)
             
-            if args.contrastive:
-                save_str = 'save'
+            save_str = '----'
+            if aurocMean > aurocMAX:
+                aurocMAX = aurocMean
                 best_model = copy.deepcopy(model)
                 torch.save({'epoch': epochID + 1, 'state_dict': model.state_dict(), 
                             'best_auroc': aurocMAX}, 
                             save_path + 'm-epoch_FL' + save_suffix + '.pth.tar')
+                save_str = 'save'
+                patient_count = 0
             else:
-                save_str = '----'
-                if aurocMean > aurocMAX:
-                    aurocMAX = aurocMean
-                    best_model = copy.deepcopy(model)
-                    torch.save({'epoch': epochID + 1, 'state_dict': model.state_dict(), 
-                                'best_auroc': aurocMAX}, 
-                                save_path + 'm-epoch_FL' + save_suffix + '.pth.tar')
-                    save_str = 'save'
-                    patient_count = 0
-                else:
-                    patient_count += 1
+                patient_count += 1
                 
             logger.info(f"Epoch: {str(epochID + 1)} [{save_str}] validation auroc = {str(aurocMean)}, \
                 validation loss = {str(lossv)}")
@@ -256,6 +249,7 @@ class MIMICCXRTrainer():
                     lossvalue = criterion(varOutput["out"], varTarget)
                 
                 lossval += lossvalue.item()
+                outPRED = torch.cat((outPRED, sigmoid(varOutput["out"]).cpu()), 0)
                 
         aurocIndividual = compute_AUCs(outGT, outPRED.detach(), nnClassCount)
         aurocMean = np.array(aurocIndividual).mean()
@@ -306,6 +300,7 @@ class MIMICCXRTrainer():
                 lossvalue = criterion(varOutput["out"], varTarget)
 
                 losstest += lossvalue.item()
+                outPRED = torch.cat((outPRED, sigmoid(varOutput["out"]).cpu()), 0)
         
         aurocIndividual = compute_AUCs(outGT, outPRED, nnClassCount)
         aurocMean = np.array(aurocIndividual).mean()
