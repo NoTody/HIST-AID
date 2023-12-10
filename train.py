@@ -68,9 +68,7 @@ def get_args():
     parser.add_argument("--lock", default=False, action='store_true')
     parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--use_time", default=False, action='store_true')
-    parser.add_argument("--gating", default=False, action='store_true')
     parser.add_argument("--use_amp", default=False, action='store_true')
-    parser.add_argument("--contrastive", default=False, action='store_true')
     parser.add_argument("--pos_encoding", type=str , choices=["learnable", "fixed", "mixed"], default="learnable")
     parser.add_argument("--img_lr", type=float, default=1e-4)
     parser.add_argument("--text_lr", type=float, default=1e-5)
@@ -78,7 +76,6 @@ def get_args():
     parser.add_argument("--decoder_layers", type=int, default=3)
     parser.add_argument("--text_len", type=int, default=200)
     parser.add_argument("--patient", type=int, default=5)
-    parser.add_argument("--peft", default=False, action='store_true')
     
     # dataset parameters
     parser.add_argument("--batch_size", type=int, default=64)
@@ -268,14 +265,6 @@ def main(args, logger):
 
     logger.info("---------------------Fine-Tuning---------------------")
     logger.info("Training  ...")
-    
-    # unfreeze for finetuning
-    if args.mode == 'img':
-        for param in model.module.img_backbone.parameters():
-            param.requires_grad = True
-    if args.mode == 'mm' or args.mode == 'text':
-        for param in model.module.text_backbone.parameters():
-            param.requires_grad = True
 
     best_model = MIMICCXRTrainer.train(args, logger, model, dataLoaderTrain, dataLoaderVal, nnClassCount, trMaxEpoch, \
         checkpoint = None, save_suffix = args.save_suffix)
