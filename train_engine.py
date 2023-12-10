@@ -256,18 +256,11 @@ class MIMICCXRTrainer():
                     lossvalue = criterion(varOutput["out"], varTarget)
                 
                 lossval += lossvalue.item()
-
-                if not args.contrastive:
-                    outPRED = torch.cat((outPRED, sigmoid(varOutput["out"]).cpu()), 0)
+                
+        aurocIndividual = compute_AUCs(outGT, outPRED.detach(), nnClassCount)
+        aurocMean = np.array(aurocIndividual).mean()
         
-
-        if args.contrastive:
-            return 0, lossval / len(dataLoaderVal)
-        else:
-            aurocIndividual = compute_AUCs(outGT, outPRED.detach(), nnClassCount)
-            aurocMean = np.array(aurocIndividual).mean()
-            
-            return aurocMean, lossval / len(dataLoaderVal)
+        return aurocMean, lossval / len(dataLoaderVal)
     
     
     def test(args, logger, model, dataLoaderTest, nnClassCount, class_names):
@@ -313,10 +306,6 @@ class MIMICCXRTrainer():
                 lossvalue = criterion(varOutput["out"], varTarget)
 
                 losstest += lossvalue.item()
-
-                if not args.contrastive:
-                    outPRED = torch.cat((outPRED, sigmoid(varOutput["out"]).cpu()), 0)
-
         
         aurocIndividual = compute_AUCs(outGT, outPRED, nnClassCount)
         aurocMean = np.array(aurocIndividual).mean()
