@@ -267,11 +267,11 @@ def main(args, logger):
     logger.info("Training  ...")
 
     best_model = MIMICCXRTrainer.train(args, logger, model, dataLoaderTrain, dataLoaderVal, nnClassCount, trMaxEpoch, \
-        checkpoint = None, save_suffix = args.save_suffix)
+        save_suffix = args.save_suffix)
 
     # switch to evaluate mode
     logger.info("Testing  ...")
-    MIMICCXRTrainer.test(args, logger, best_model, dataLoaderTest, nnClassCount, None, class_names)
+    MIMICCXRTrainer.test(args, logger, best_model, dataLoaderTest, nnClassCount, class_names)
 
 
 def set_seed(seed):

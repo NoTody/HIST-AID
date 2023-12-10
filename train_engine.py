@@ -14,7 +14,7 @@ from lr_sched_utils import get_cosine_schedule_with_warmup
 
 class MIMICCXRTrainer():
 
-    def train(args, logger, model, dataLoaderTrain, dataLoaderVal, nnClassCount, trMaxEpoch, checkpoint, save_suffix):
+    def train(args, logger, model, dataLoaderTrain, dataLoaderVal, nnClassCount, trMaxEpoch, save_suffix):
         best_model = copy.deepcopy(model)
         
         # different learning rate for encoder and decoder (since decoder is not pretrained)
@@ -270,7 +270,7 @@ class MIMICCXRTrainer():
             return aurocMean, lossval / len(dataLoaderVal)
     
     
-    def test(args, logger, model, dataLoaderTest, nnClassCount, checkpoint, class_names):
+    def test(args, logger, model, dataLoaderTest, nnClassCount, class_names):
         model.eval()
         
         losstest = 0
