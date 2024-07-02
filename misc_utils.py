@@ -107,3 +107,31 @@ def set_requires_grad_false(*models):
 @contextmanager
 def dummy_context():
     yield
+    
+
+# apply normalization to tensor with shape [sequence length, batch size, embed dim]
+def normalize(x, norm):
+    x = x.permute(1, 2, 0)
+    x = norm(x)
+    x = x.permute(2, 0, 1)
+    
+    return x
+    
+    
+def generate_attention_mask(padding_masks_q, padding_masks_k, n_heads, device):
+    B, L1, L2 = padding_masks_k.shape[0], padding_masks_q.shape[1], \
+        padding_masks_k.shape[1]
+    attention_mask = torch.full(
+        (B, L1, L2), float("-inf"),
+    )
+    # Processing
+    for b in range(B):
+        true_indices_q = padding_masks_q[b].nonzero().squeeze()
+        true_indices_k = padding_masks_k[b].nonzero().squeeze()
+        
+        attention_mask[b, true_indices_q, :] = 0  # Set entire rows to 0
+        attention_mask[b, :, true_indices_k] = 0  # Set entire columns to 0
+        
+    attention_mask = attention_mask.unsqueeze(1).repeat(1, n_heads, 1, 1).to(device)
+    
+    return attention_mask

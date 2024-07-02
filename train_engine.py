@@ -2,6 +2,7 @@ import os
 import copy
 import time
 import wandb
+import pickle
 import numpy as np
 from tqdm import tqdm
 
@@ -13,7 +14,6 @@ from lr_sched_utils import get_cosine_schedule_with_warmup
 
 
 class MIMICCXRTrainer():
-
     def train(args, logger, model, dataLoaderTrain, dataLoaderVal, nnClassCount, trMaxEpoch, save_suffix):
         best_model = copy.deepcopy(model)
         
@@ -48,7 +48,8 @@ class MIMICCXRTrainer():
         betas = (0.9, 0.999)
         weight_decay = 0.01
         eps = 1e-5
-
+    
+        # image optimizer/scheduler
         if img_pretrained_params != [] and (not args.lock):
             # optimizer
             img_pretrained_optimizer = optim.AdamW(img_pretrained_params, lr = args.img_lr * lr_mult, \
@@ -59,6 +60,7 @@ class MIMICCXRTrainer():
                 num_training_steps, lr_end = args.img_lr * 1e-3 * lr_mult)
             schedulers.append(img_pretrained_scheduler)
         
+        # text optimizer/scheduler
         if text_pretrained_params != [] and (not args.lock):
             # optimizer
             text_pretrained_optimizer = optim.AdamW(text_pretrained_params, lr = args.text_lr * lr_mult, \
@@ -68,7 +70,8 @@ class MIMICCXRTrainer():
             text_pretrained_scheduler = get_cosine_schedule_with_warmup(text_pretrained_optimizer, num_warmup_steps, \
                 num_training_steps, lr_end = args.text_lr * 1e-3 * lr_mult)
             schedulers.append(text_pretrained_scheduler)
-            
+        
+        # not pretrained optimizer/scheduler
         if unpretrained_params != []:
             # optimizer
             unpretrained_optimizer = optim.AdamW(unpretrained_params, lr = args.unpre_lr * lr_mult, \
@@ -82,11 +85,12 @@ class MIMICCXRTrainer():
         # loss
         criterion = torch.nn.BCEWithLogitsLoss()
 
-        # Train the network
+        # model save path
         save_path = './model_saved/'
         if not os.path.exists(save_path):
             os.makedirs(save_path)
-                
+        
+        # Train the network
         aurocMAX = -1
         patient_count = 0
         train_start = []
@@ -103,7 +107,7 @@ class MIMICCXRTrainer():
             save_str = '----'
             if aurocMean > aurocMAX:
                 aurocMAX = aurocMean
-                best_model = copy.deepcopy(model)
+                best_model.load_state_dict(copy.deepcopy(model.state_dict()))
                 torch.save({'epoch': epochID + 1, 'state_dict': model.state_dict(), 
                             'best_auroc': aurocMAX}, 
                             save_path + 'm-epoch_FL' + save_suffix + '.pth.tar')
@@ -143,7 +147,7 @@ class MIMICCXRTrainer():
                     if args.use_wandb and args.local_rank == 0:
                         wandb.log({f"optimizer ({idx}) lr": optimizer.param_groups[0]['lr']})
                         
-                x_img, x_text, varTarget, image_time, text_time = batch
+                x_img, x_text, varTarget, img_time, text_time = batch
                 
                 if args.img_time_series:
                     for img in x_img:
@@ -161,9 +165,9 @@ class MIMICCXRTrainer():
                 # mix-precision
                 with torch.cuda.amp.autocast(enabled=args.use_amp):
                     if 'mm' in args.mode:
-                        varOutput = model(x_img, x_text, image_time, text_time)
+                        varOutput = model(x_img, x_text, img_time, text_time)
                     elif args.mode == 'img':
-                        varOutput = model(x_img, image_time)
+                        varOutput = model(x_img, img_time)
                     elif args.mode == 'text':
                         varOutput = model(x_text, text_time)
                     else:
@@ -185,7 +189,8 @@ class MIMICCXRTrainer():
                 # unscale
                 for idx in range(len(optimizers)):
                     scaler.unscale_(optimizers[idx])
-                    
+                
+                # reset occasional nan gradients for more stable training
                 remove_nan_gradients(model)
                 
                 # gradient clipping
@@ -214,7 +219,7 @@ class MIMICCXRTrainer():
         
         with torch.no_grad():
             for batchID, batch in enumerate(tqdm(dataLoaderVal)):
-                x_img, x_text, varTarget, image_time, text_time = batch
+                x_img, x_text, varTarget, img_time, text_time = batch
                 
                 if args.img_time_series:
                     for img in x_img:
@@ -232,21 +237,17 @@ class MIMICCXRTrainer():
 
                 with torch.cuda.amp.autocast(enabled=args.use_amp):
                     if 'mm' in args.mode:
-                        varOutput = model(x_img, x_text, image_time, text_time)
+                        varOutput = model(x_img, x_text, img_time, text_time)
                     elif args.mode == 'img':
-                        varOutput = model(x_img, image_time)
+                        varOutput = model(x_img, img_time)
                     elif args.mode == 'text':
                         varOutput = model(x_text, text_time)
                     else:
                         raise NotImplementedError(f"Mode {args.mode} Not Implemented!")
                 
-                if args.contrastive:
-                    img_feat, text_feat = varOutput['img_feat'], varOutput['text_feat']
-                    lossvalue = criterion(img_feat, text_feat)
-                else:
-                    # avoid diverge
-                    varOutput["out"] = varOutput["out"].float()
-                    lossvalue = criterion(varOutput["out"], varTarget)
+                # avoid diverge
+                varOutput["out"] = varOutput["out"].float()
+                lossvalue = criterion(varOutput["out"], varTarget)
                 
                 lossval += lossvalue.item()
                 outPRED = torch.cat((outPRED, sigmoid(varOutput["out"]).cpu()), 0)
@@ -264,13 +265,14 @@ class MIMICCXRTrainer():
         sigmoid = torch.nn.Sigmoid()
         outGT = torch.FloatTensor()
         outPRED = torch.FloatTensor()
-
+        varOutput_all = []
+        count = []
         # loss
         criterion = torch.nn.BCEWithLogitsLoss()
         
         with torch.no_grad():
             for batchID, batch in enumerate(tqdm(dataLoaderTest)):
-                x_img, x_text, varTarget, image_time, text_time = batch
+                x_img, x_text, varTarget, img_time, text_time = batch
                 
                 if args.img_time_series:
                     for img in x_img:
@@ -285,12 +287,12 @@ class MIMICCXRTrainer():
                 for text in x_text:
                     for key in text.keys():
                         text[key] = text[key].cuda(non_blocking=True)
-
+                
                 with torch.cuda.amp.autocast(enabled=args.use_amp):
                     if 'mm' in args.mode:
-                        varOutput = model(x_img, x_text, image_time, text_time)
+                        varOutput = model(x_img, x_text, img_time, text_time)
                     elif args.mode == 'img':
-                        varOutput = model(x_img, image_time)
+                        varOutput = model(x_img, img_time)
                     elif args.mode == 'text':
                         varOutput = model(x_text, text_time)
                     else:
@@ -298,13 +300,11 @@ class MIMICCXRTrainer():
                 
                 varOutput["out"] = varOutput["out"].float()
                 lossvalue = criterion(varOutput["out"], varTarget)
-
                 losstest += lossvalue.item()
                 outPRED = torch.cat((outPRED, sigmoid(varOutput["out"]).cpu()), 0)
         
         aurocIndividual = compute_AUCs(outGT, outPRED, nnClassCount)
         aurocMean = np.array(aurocIndividual).mean()
-        #print('AUROC mean ', aurocMean)
         logger.info(f"AUROC Mean: {aurocMean}")
         
         for i in range (0, len(aurocIndividual)):
@@ -312,3 +312,4 @@ class MIMICCXRTrainer():
     
         if args.use_wandb and args.local_rank == 0:
             wandb.log({"Test AUROC": aurocMean})
+            

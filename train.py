@@ -9,7 +9,8 @@ from functools import partial
 from dataset import MIMICCXRDataSet
 from train_engine import MIMICCXRTrainer
 from misc_utils import init_distributed_mode
-from models import vit_model, bert_model, mm_model, mm_model_early, mm_model_intermediate
+from models import vit_model, bert_model, mm_model, \
+    mm_model_early, mm_model_intermediate
 
 import torch
 import torch.distributed as dist
@@ -55,7 +56,7 @@ def get_args():
     parser.add_argument("--save_suffix", type=str, default="")
     parser.add_argument("--seed", type=int, default=2022)
     parser.add_argument("--method", type=str , choices=["average", "decoder"], default="decoder")
-    parser.add_argument("--fusion_method", type=str , choices=["Block", "ConcatMLP"] ,default="Block")
+    parser.add_argument("--fusion_method", type=str , choices=["Block", "ConcatMLP", "METER"] ,default="Block")
     parser.add_argument("--pretrained", type=str , choices=["hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"],
                         default="hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224")
     parser.add_argument("--exclude_label", default=False, action='store_true')
@@ -65,11 +66,12 @@ def get_args():
     parser.add_argument("--text_time_series", default=False, action='store_true')
     parser.add_argument("--img_max_len", default=5, type=int)
     parser.add_argument("--text_max_len", default=50, type=int)
+    parser.add_argument("--d_model", default=768, type=int)
     parser.add_argument("--lock", default=False, action='store_true')
     parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--use_time", default=False, action='store_true')
     parser.add_argument("--use_amp", default=False, action='store_true')
-    parser.add_argument("--pos_encoding", type=str , choices=["learnable", "fixed", "mixed"], default="learnable")
+    parser.add_argument("--pos_encoding", type=str , choices=["learnable", "fixed", "mixed", "rope", "none"], default="learnable")
     parser.add_argument("--img_lr", type=float, default=1e-4)
     parser.add_argument("--text_lr", type=float, default=1e-5)
     parser.add_argument("--unpre_lr", type=float, default=1e-4)
@@ -96,7 +98,6 @@ def get_args():
     parser.add_argument("--local_rank", type=int, required=True, help='local rank for DistributedDataParallel')
     parser.add_argument('--dist-backend', default='nccl', help='used to set up distributed backend')
     parser.add_argument('--dist-url', default='env://', help='url used to set up distributed training')
-    
     parser.add_argument("--log_dir", type=str, default="./logger_output")
     
     args = parser.parse_args()
@@ -138,15 +139,15 @@ def main(args, logger):
     
     gpu = torch.device('cuda')
     
-    IMAGENET_MEAN = [0.5, 0.5, 0.5]
-    IMAGENET_STD = [0.5, 0.5, 0.5]
+    MEAN = [0.5, 0.5, 0.5]
+    STD = [0.5, 0.5, 0.5]
     
     # Training settings: batch size, maximum number of epochs
     trBatchSize = args.batch_size
     trMaxEpoch = args.max_epoch
     
     # Tranform data
-    normalize = transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD)
+    normalize = transforms.Normalize(MEAN, STD)
     
     transforms_train = transforms.Compose([
         transforms.RandomResizedCrop(imgtransCrop, 
@@ -169,8 +170,8 @@ def main(args, logger):
         transforms.ToTensor(),
         normalize])
 
-    token_model = "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
-    tokenizer = AutoTokenizer.from_pretrained(token_model, use_fast=True)
+    model_name = "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
     collate_fn = collate_fn_batch_encoding
 
@@ -180,7 +181,7 @@ def main(args, logger):
     # Load dataset
     # Train
     datasetTrain = MIMICCXRDataSet(args, args.train_path, args.img_time_series, \
-        transforms_train, policy = "ones")
+        transforms_train, policy="ones")
     logger.info(f"Train data length: {len(datasetTrain)}")
     # Datasampler
     sampler_train = torch.utils.data.distributed.DistributedSampler(
@@ -196,7 +197,7 @@ def main(args, logger):
                                                     img_time_series=args.img_time_series))
     # Val
     datasetValid = MIMICCXRDataSet(args, args.val_path, args.img_time_series, \
-        transforms_val, policy = "ones")
+        transforms_val, policy="ones")
     logger.info(f"Valid data length: {len(datasetValid)}")
     # Datasampler
     sampler_val = torch.utils.data.distributed.DistributedSampler(
@@ -211,7 +212,7 @@ def main(args, logger):
                                                   img_time_series=args.img_time_series))
     # Test
     datasetTest = MIMICCXRDataSet(args, args.test_path, args.img_time_series, \
-        transforms_val, policy = "ones")
+        transforms_val, policy="ones")
     logger.info(f"Test data length: {len(datasetTest)}")
     # Datasampler
     sampler_test = torch.utils.data.distributed.DistributedSampler(
@@ -220,37 +221,38 @@ def main(args, logger):
         num_replicas=num_tasks,
         rank=global_rank
     )
-    dataLoaderTest = DataLoader(dataset=datasetTest, sampler=sampler_test, batch_size=trBatchSize, 
-                                num_workers=args.num_workers, pin_memory=True,
-                                collate_fn=partial(collate_fn, tokenizer=tokenizer, text_len=args.text_len,
+    dataLoaderTest = DataLoader(dataset=datasetTest, sampler=sampler_test, batch_size=trBatchSize, \
+                                num_workers=args.num_workers, pin_memory=True, \
+                                collate_fn=partial(collate_fn, tokenizer=tokenizer, text_len=args.text_len, \
                                                    img_time_series=args.img_time_series))
 
     if args.model_name == "vitb16":
-        features_dim = 768
+        d_model = args.d_model
         out_size = nnClassCount
         
         logger.info(f"Use Mode: {args.mode}")
         
         if args.mode == 'mm':
-            model = mm_model(args, features_dim, out_size,  \
+            model = mm_model(args, d_model, out_size,  \
                 fusion_method=args.fusion_method, method=args.method, pretrained=args.pretrained, \
                 lock=args.lock, use_time=args.use_time, pos_encoding=args.pos_encoding, \
                 img_max_len=args.img_max_len, text_max_len=args.text_max_len).cuda(gpu)
         elif args.mode == 'mm_early':
-            model = mm_model_early(args, features_dim, out_size, pretrained=args.pretrained, \
+            model = mm_model_early(args, d_model, out_size, method=args.method, pretrained=args.pretrained, \
                 lock=args.lock, use_time=args.use_time, pos_encoding=args.pos_encoding, \
                 img_max_len=args.img_max_len, text_max_len=args.text_max_len).cuda(gpu)
         elif args.mode == 'mm_intermediate':
-            model = mm_model_intermediate(args, features_dim, out_size, pretrained=args.pretrained, \
+            model = mm_model_intermediate(args, d_model, out_size, pretrained=args.pretrained, \
                 lock=args.lock, use_time=args.use_time, pos_encoding=args.pos_encoding, \
                 img_max_len=args.img_max_len, text_max_len=args.text_max_len).cuda(gpu)
         elif args.mode == 'img':
-            model = vit_model(args, features_dim, out_size, pretrained=args.pretrained, \
+            model = vit_model(args, d_model, out_size, pretrained=args.pretrained, \
                 method=args.method, lock=args.lock, use_time=args.use_time, \
-                pos_encoding=args.pos_encoding).cuda(gpu)
+                pos_encoding=args.pos_encoding, img_max_len=args.img_max_len).cuda(gpu)
         elif args.mode == 'text':
-            model = bert_model(args, features_dim, out_size, pretrained=args.pretrained, method=args.method,
-                lock=args.lock, use_time=args.use_time, pos_encoding=args.pos_encoding).cuda(gpu)
+            model = bert_model(args, d_model, out_size, pretrained=args.pretrained, method=args.method, \
+                lock=args.lock, use_time=args.use_time, pos_encoding=args.pos_encoding, \
+                text_max_len=args.text_max_len).cuda(gpu)
         else:
             raise NotImplementedError(f"Mode {args.mode} Not Implemented!")
     else:
@@ -286,8 +288,6 @@ def set_seed(seed):
     
 
 if __name__ == "__main__":
-    #torch.autograd.set_detect_anomaly(True)
-    #os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count()))
     # supress warning
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

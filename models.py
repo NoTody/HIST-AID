@@ -3,23 +3,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import open_clip
+import timm
+
 from block import fusions
+
+from attention_module import CrossAttentionLayer
 
 from ts_transformer import TSTransformerEncoderClassiregressor, EarlyTSTransformerEncoderClassiregressor, \
     BottleneckTSTransformerEncoderClassiregressor
 
-from misc_utils import padding, get_embed, dummy_context, set_requires_grad_false
+from misc_utils import padding, get_embed, dummy_context, \
+    set_requires_grad_false, generate_attention_mask
 
 
 class vit_model(nn.Module):
     def __init__(self, args, features_dim, out_size, method='decoder', 
                  pretrained='hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224', 
-                 lock=False, use_time=False, pos_encoding='learnable'):
+                 lock=False, use_time=False, pos_encoding='learnable', img_max_len=5):
         
         super(vit_model, self).__init__()
         
         self.method = method
         self.img_time_series = args.img_time_series
+        self.img_max_len = img_max_len
         self.use_time = use_time
         self.lock = lock
         self.feature_dim_in = features_dim
@@ -32,16 +38,16 @@ class vit_model(nn.Module):
         if self.img_time_series:
             if method == 'decoder':
                 feat_dim = 768
-                max_len = 6
+                max_len = img_max_len+1
                 d_model = 768
-                n_heads = 16
+                n_heads = 12
                 num_layers = 3
-                dim_feedforward = 3074
+                dim_feedforward = d_model * 4
                 num_classes = 13
                 
                 self.img_decoder = TSTransformerEncoderClassiregressor(feat_dim, max_len, d_model, n_heads, \
                             num_layers, dim_feedforward, num_classes, use_time=use_time, pos_encoding=pos_encoding)
-
+                
         if (not self.img_time_series) or method == 'average':
             self.classifier = nn.Sequential(
                 nn.Linear(self.feature_dim_in, out_size),
@@ -54,7 +60,7 @@ class vit_model(nn.Module):
             # convert text_time to tensor
             img_time = [torch.tensor(time).cuda() for time in img_time]
             # accumulate text embedding and take mean
-            max_length = 5
+            max_length = self.img_max_len
             # padding masks initialized with cls token mask
             padding_masks = torch.Tensor([])
 
@@ -110,12 +116,13 @@ class vit_model(nn.Module):
 class bert_model(nn.Module):
     def __init__(self, args, features_dim, out_size, method='decoder', pool='cls', lock=False,
                  pretrained='hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224', 
-                 use_time=False, pos_encoding='learnable'):
+                 use_time=False, pos_encoding='learnable', text_max_len=50):
         super(bert_model, self).__init__()
         
         self.args = args
         clip_model, _, _ = open_clip.create_model_and_transforms(pretrained)
         self.text_backbone = clip_model.text.transformer
+        self.text_max_len = text_max_len
         
         self.pool = pool
         self.method = method
@@ -124,11 +131,11 @@ class bert_model(nn.Module):
         
         if args.text_time_series and self.method == 'decoder':
             feat_dim = 768
-            max_len = 51
+            max_len = text_max_len+1
             d_model = 768
-            n_heads = 16
+            n_heads = 12
             num_layers = 3
-            dim_feedforward = 3074
+            dim_feedforward = d_model * 4
             num_classes = 13
             
             self.text_decoder = TSTransformerEncoderClassiregressor(feat_dim, max_len, d_model, n_heads, \
@@ -148,7 +155,7 @@ class bert_model(nn.Module):
             # convert text_time to tensor
             text_time = [torch.tensor(time).cuda() for time in text_time]
             # accumulate text embedding and take mean
-            max_length = 50
+            max_length = self.text_max_len
             text_feature = None
             # padding masks initialized with cls token mask
             padding_masks = torch.Tensor([])
@@ -198,10 +205,9 @@ class bert_model(nn.Module):
     
     
 class mm_model(nn.Module):
-    def __init__(self, args, features_dim, out_size, method='average', fusion_method='Block',
+    def __init__(self, args, d_model, out_size, method='average', fusion_method='Block',
                  pool='cls', lock=False, use_time=False, pos_encoding='learnable', img_max_len=5, 
-                 text_max_len=50, pretrained='hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224',
-                 ):
+                 text_max_len=50, pretrained='hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224'):
         super(mm_model, self).__init__()
 
         self.img_time_series = args.img_time_series
@@ -211,6 +217,7 @@ class mm_model(nn.Module):
         self.method = method
         self.fusion_method = fusion_method
         self.lock = lock
+        self.n_heads = 12
 
         clip_model, _, _ = open_clip.create_model_and_transforms(pretrained)
         self.img_backbone = clip_model.visual.trunk
@@ -225,8 +232,8 @@ class mm_model(nn.Module):
             # text decoder
             feat_dim = 768
             max_len = text_max_len+1
-            d_model = 768
-            n_heads = 16
+            d_model = d_model
+            n_heads = 12
             num_layers = args.decoder_layers
             dim_feedforward = d_model * 4
             num_classes = 13
@@ -237,8 +244,8 @@ class mm_model(nn.Module):
             # image decoder
             feat_dim = 768
             max_len = img_max_len+1
-            d_model = 768
-            n_heads = 16
+            d_model = d_model
+            n_heads = 12
             num_layers = 3
             dim_feedforward = d_model * 4
             num_classes = 13
@@ -252,6 +259,9 @@ class mm_model(nn.Module):
             mm_dim = 1200
             dimensions = [mm_dim, mm_dim]
             self.fusion = fusions.ConcatMLP([768, 768], output_dim=mm_dim, dimensions=dimensions)
+        elif fusion_method == 'METER':
+            mm_dim = 768
+            self.fusion = CrossAttentionLayer(num_embed=768, n_layers=3, num_heads=12, dropout=0.)
         else:
             raise NotImplementedError(f"{fusion_method} not implemented")
         
@@ -259,7 +269,7 @@ class mm_model(nn.Module):
             set_requires_grad_false(self.img_backbone, self.text_backbone)
 
         if self.method == 'average':
-            d_model = 768
+            d_model = 1600
             self.classifier = nn.Sequential(
                 nn.Linear(d_model, out_size),
             )
@@ -313,9 +323,9 @@ class mm_model(nn.Module):
                 text_time_padded = padding(text_time, max_length, pad_embedding=False)
 
                 # text embedding
-                if self.method == 'decoder':
-                    _, text_feature  = self.text_decoder(accum_embeddings_padded, text_padding_masks, \
-                        text_time_padded, output_feature=True, cls_token=True)
+                cls_token = False if self.fusion_method == 'METER' else True
+                _, text_feature  = self.text_decoder(accum_embeddings_padded, text_padding_masks, \
+                    text_time_padded, output_feature=True, cls_token=cls_token)
         else:
             text_inp = torch.cat([d["input_ids"][-1].unsqueeze(dim=0) for d in x_text]).cuda()
             with torch.no_grad() if self.lock else dummy_context():
@@ -364,30 +374,28 @@ class mm_model(nn.Module):
                 accum_embeddings_padded = padding(accum_embeddings, max_length, pad_embedding=True)
                 accum_embeddings_padded = F.normalize(accum_embeddings_padded, p=2, dim=-1)
                 img_time_padded = padding(img_time, max_length, pad_embedding=False)
-                logits, img_feature = self.img_decoder(accum_embeddings_padded, img_padding_masks, \
-                        img_time_padded, output_feature=True, cls_token=True)
+                cls_token = False if self.fusion_method == 'METER' else True
+                _, img_feature = self.img_decoder(accum_embeddings_padded, img_padding_masks, \
+                        img_time_padded, output_feature=True, cls_token=cls_token)
         else:
             with torch.no_grad() if self.lock else dummy_context():
                 img_feature = self.img_backbone(x_img)
-
-        if self.text_time_series and (not self.img_time_series):
-            x_img, x_text = torch.nn.functional.normalize(img_feature, p=2, dim=-1), \
-                torch.nn.functional.normalize(text_feature, p=2, dim=-1)
-            x_fuse = self.fusion([x_img, x_text])
-            logits = self.classifier(x_fuse)
-        elif self.img_time_series and self.text_time_series:
-            x_img, x_text = torch.nn.functional.normalize(img_feature, p=2, dim=-1), \
-                torch.nn.functional.normalize(text_feature, p=2, dim=-1)
-            x_fuse = self.fusion([x_img, x_text])
-            logits = self.classifier(x_fuse)
-        elif not self.img_time_series or not self.text_time_series:
-            x_img, x_text = torch.nn.functional.normalize(img_feature, p=2, dim=-1), \
-                torch.nn.functional.normalize(text_feature, p=2, dim=-1)
-            x_fuse = self.fusion([x_img, x_text])
+                
+        x_img, x_text = torch.nn.functional.normalize(img_feature, p=2, dim=-1), \
+            torch.nn.functional.normalize(text_feature, p=2, dim=-1)
+        
+        if self.fusion_method == 'METER':
+            device = text_padding_masks.device
+            attention_masks_ca = generate_attention_mask(img_padding_masks, \
+                text_padding_masks, self.n_heads, device)
+            attention_masks_sa = generate_attention_mask(text_padding_masks, \
+                text_padding_masks, self.n_heads, device)
+            x_fuse = self.fusion([x_img, x_text], attention_masks_ca, attention_masks_sa)
             logits = self.classifier(x_fuse)
         else:
-            raise NotImplementedError("Wrong img/text_time_series input!")
-
+            x_fuse = self.fusion([x_img, x_text])
+            logits = self.classifier(x_fuse)
+        
         out = {}
         out['out'] = logits
 
@@ -395,9 +403,9 @@ class mm_model(nn.Module):
     
     
 class mm_model_early(nn.Module):
-    def __init__(self, args, features_dim, out_size, pool='cls', img_max_len=5, text_max_len=50,
+    def __init__(self, args, d_model, out_size, method='average', pool='cls', img_max_len=5, text_max_len=50,
                  lock=False, pretrained='hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224',
-                 use_time=False, pos_encoding='learnable'):
+                 use_time=False, pos_encoding='learnable', fused_attn=True):
         super(mm_model_early, self).__init__()
         
         self.img_max_len = img_max_len
@@ -406,19 +414,23 @@ class mm_model_early(nn.Module):
         self.img_time_series = args.img_time_series
         self.text_time_series = args.text_time_series
         self.lock = lock
+        self.method = method
 
         clip_model, _, _ = open_clip.create_model_and_transforms(pretrained)
-        self.img_backbone = clip_model.visual.trunk
+        self.img_backbone = timm.create_model(
+            'vit_base_patch16_224.augreg_in21k',
+            pretrained=True,
+            num_classes=0,  # remove classifier nn.Linear
+        )
         self.text_backbone = clip_model.text.transformer
 
         self.relu = nn.ReLU()
         self.pool = pool
-        self.img_backbone.fc = nn.Identity()
         
         # text decoder
         feat_dim = 768
-        d_model = 768
-        n_heads = 16
+        d_model = d_model
+        n_heads = 12
         dim_feedforward = d_model * 4
         max_len_img = args.img_max_len
         max_len_text = args.text_max_len
@@ -426,7 +438,7 @@ class mm_model_early(nn.Module):
         num_classes = out_size
         
         self.decoder = EarlyTSTransformerEncoderClassiregressor(feat_dim, max_len_img, max_len_text, d_model, n_heads, \
-            num_layers, dim_feedforward, num_classes, use_time=use_time, pos_encoding=pos_encoding)
+            num_layers, dim_feedforward, num_classes, use_time=use_time, pos_encoding=pos_encoding, fused_attn=fused_attn)
         
         hidden_dim = feat_dim
         
@@ -460,25 +472,33 @@ class mm_model_early(nn.Module):
             # separate embeddings by time-series length
             text_embeddings = torch.split(text_embeddings, lengths)
             
-            # calculate padding embeddings
-            for text_embedding in text_embeddings:
-                if text_embedding != None:
-                    true_length = min(text_embedding.shape[0], max_length)                                
-                    indices = torch.arange(max_length)
-                    mask = (indices < true_length)
-                    if len(padding_masks_text) == 0:
-                        padding_masks_text = mask.unsqueeze(dim=0)
-                    else:
-                        padding_masks_text = torch.cat((padding_masks_text, mask.unsqueeze(dim=0)), dim=0)
+            if self.method == 'average':
+                accum_embeddings_padded_text = torch.cat([torch.mean(embed, dim=0).view(1,-1) \
+                    for embed in text_embeddings]).unsqueeze(dim=1).cuda()
+                bs = accum_embeddings_padded_text.shape[0]
+                padding_masks_text = torch.tensor([True], dtype=torch.bool).unsqueeze(dim=0).repeat(bs, 1).cuda()
+                time_padded_text = torch.tensor([1.0000], dtype=torch.float).unsqueeze(dim=0).repeat(bs, 1).cuda()
+            else:
+                # calculate padding embeddings
+                for text_embedding in text_embeddings:
+                    if text_embedding != None:
+                        true_length = min(text_embedding.shape[0], max_length)                                
+                        indices = torch.arange(max_length)
+                        mask = (indices < true_length)
+                        if len(padding_masks_text) == 0:
+                            padding_masks_text = mask.unsqueeze(dim=0)
+                        else:
+                            padding_masks_text = torch.cat((padding_masks_text, mask.unsqueeze(dim=0)), dim=0)
+                            
+                        accum_embeddings.append(text_embedding)
                         
-                    accum_embeddings.append(text_embedding)
-                    
-            padding_masks_text = padding_masks_text.cuda()
-            accum_embeddings_padded_text = padding(accum_embeddings, max_length, pad_embedding=True)
-            accum_embeddings_padded_text = F.normalize(accum_embeddings_padded_text, p=2, dim=-1)
-            time_padded_text = padding(text_time, max_length, pad_embedding=False)
+                padding_masks_text = padding_masks_text.cuda()
+                accum_embeddings_padded_text = padding(accum_embeddings, max_length, pad_embedding=True)
+                accum_embeddings_padded_text = F.normalize(accum_embeddings_padded_text, p=2, dim=-1)
+                time_padded_text = padding(text_time, max_length, pad_embedding=False)
         else:
             text_inp = torch.cat([d["input_ids"][-1].unsqueeze(dim=0) for d in x_text]).cuda()
+            bs = text_inp.shape[0]
             
             with torch.no_grad() if self.lock else dummy_context():
                 accum_embeddings_padded_text = get_embed(text_inp, self.text_backbone, self.pool).unsqueeze(dim=1)
@@ -530,21 +550,24 @@ class mm_model_early(nn.Module):
             accum_embeddings_padded_img = self.img_backbone(x_img).unsqueeze(dim=1).cuda()
             padding_masks_img = torch.tensor([True, True], dtype=torch.bool).unsqueeze(dim=0).repeat(bs, 1).cuda()
             time_padded_img = torch.tensor([1.0000], dtype=torch.float).unsqueeze(dim=0).repeat(bs, 1).cuda()
-        
+            
         # time-series forward
-        _, feature = self.decoder(accum_embeddings_padded_img, accum_embeddings_padded_text, padding_masks_img, \
+        _, feature, cls_weight_scores = self.decoder(accum_embeddings_padded_img, accum_embeddings_padded_text, padding_masks_img, \
             time_padded_img, padding_masks_text, time_padded_text, output_feature=True, cls_token=True)
         
         logits = self.classifier(feature)
-
+        
         out = {}
         out['out'] = logits
+        out['weight_scores'] = cls_weight_scores
+        out['padding_masks_img'] = padding_masks_img
+        out['padding_masks_text'] = padding_masks_text
 
         return out
     
     
 class mm_model_intermediate(nn.Module):
-    def __init__(self, args, features_dim, out_size, pool='cls', img_max_len=5, text_max_len=50,
+    def __init__(self, args, d_model, out_size, pool='cls', img_max_len=5, text_max_len=50,
                  lock=False, pretrained='hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224',
                  use_time=False, pos_encoding='learnable'):
         super(mm_model_intermediate, self).__init__()
@@ -566,7 +589,7 @@ class mm_model_intermediate(nn.Module):
         
         # decoder
         feat_dim = 768
-        d_model = 768
+        d_model = d_model
         n_heads = 16
         bottleneck_len = 4
         dim_feedforward = d_model * 4
@@ -578,10 +601,6 @@ class mm_model_intermediate(nn.Module):
 
         if lock:
             set_requires_grad_false(self.img_backbone, self.text_backbone)
-
-        # self.classifier = nn.Sequential(
-        #     nn.Linear(feat_dim, out_size)
-        # )
 
     def forward(self, x_img, x_text, img_time=None, text_time=None):
         if self.text_time_series:
@@ -671,13 +690,6 @@ class mm_model_intermediate(nn.Module):
             accum_embeddings_padded_img = self.img_backbone(x_img).unsqueeze(dim=1).cuda()
             padding_masks_img = torch.tensor([True, True], dtype=torch.bool).unsqueeze(dim=0).repeat(bs, 1).cuda()
             time_padded_img = torch.tensor([1.0000], dtype=torch.float).unsqueeze(dim=0).repeat(bs, 1).cuda()
-            
-        print(f"accum_embeddings_padded_img: {accum_embeddings_padded_img.shape}, \
-              accum_embeddings_padded_text: {accum_embeddings_padded_text.shape}, \
-              padding_masks_img: {padding_masks_img.shape}, \
-              time_padded_img: {time_padded_img.shape}, \
-              padding_masks_text: {padding_masks_text.shape}, \
-              time_padded_text: {time_padded_text.shape}")
         
         logits, feature = self.decoder(accum_embeddings_padded_img, accum_embeddings_padded_text, padding_masks_img, \
             time_padded_img, padding_masks_text, time_padded_text, output_feature=False, cls_token=True)
@@ -686,3 +698,4 @@ class mm_model_intermediate(nn.Module):
         out['out'] = logits
 
         return out
+    
