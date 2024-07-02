@@ -1,6 +1,6 @@
 ## Generate Dataset
 
-0 - Download and unzip [mimic-cxr-jpg](https://www.physionet.org/content/mimic-cxr-jpg/2.0.0/), [mimic-iv-2.2](https://physionet.org/content/mimiciv/2.2/) and [mimic-iv-note](https://physionet.org/content/mimiciv/2.2/) (PhysioNet Authorization required)
+0 - Download and unzip [mimic-cxr-jpg](https://www.physionet.org/content/mimic-cxr-jpg/2.0.0/), [mimic-iv-2.2](https://physionet.org/content/mimiciv/2.2/) and [mimic-iv-note](https://www.physionet.org/content/mimic-iv-note/2.2/) (PhysioNet Authorization required)
 <br>
 1 - Change core_mimiciv_path, core_mimiciv_note_path, core_mimiciv_imgcxr_path in create_pickle.py and create_mimic_txt.py to dataset saved path 
 <br>
