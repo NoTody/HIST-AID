@@ -94,7 +94,7 @@ class MIMICCXRDataSet(Dataset):
                 labels.append(label)
 
         # image root 
-        self.root = Path('/gpfs/data/denizlab/Datasets/Public/physionet.org/files/mimic-cxr-jpg/2.0.0/')
+        self.root = Path('/gpfs/data/Datasets/Public/physionet.org/files/mimic-cxr-jpg/2.0.0/')
         self.image_paths = image_paths
         self.image_times = image_times
         self.text_times = text_times
