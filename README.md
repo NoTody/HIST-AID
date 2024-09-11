@@ -26,6 +26,3 @@ where fusion method is Block (--fusion_method "Block"), early multi-modal fusion
 impression section is used for text (--section "impression"), text time series is used (--text_time_series)
 with text maximum length to be 50 (--text_max_len 50) and image maximum length to be 1 (--img_max_len 1). 
 See arguments in train.py for all argument options.
-
-## Reference
-Haoxu Huang, Cem M. Deniz, Kyunghyun Cho, Sumit Chopra, Divyam Madaan. "Temporal Fine-tuning of Medical Vision-Language Representations". In: NeurIPS Workshop on Medical Imaging Meets NeurIPS, New Orleans, LA, USA, 2023
