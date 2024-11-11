@@ -1,4 +1,4 @@
-# Temporal-MIMIC
+# HIST-AID
 This repository contains code for generating time-series radiology images and reports data by linking MIMIC-CXR and 
 MIMIC-IV with train/evaluation code for aggregating and fusing representations from both modalities.
 
