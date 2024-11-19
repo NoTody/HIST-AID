@@ -1,6 +1,13 @@
 # HIST-AID
+[![Conference](https://img.shields.io/badge/ML4H-2024-0EEDD7)](https://ahli.cc/ml4h/)
+[![Paper](https://img.shields.io/badge/Paper-arxiv.2411.10684-FF6B6B)](https://arxiv.org/abs/2411.10684)
+</div>
+
 This repository contains code for generating time-series radiology images and reports data by linking MIMIC-CXR and 
 MIMIC-IV with train/evaluation code for aggregating and fusing representations from both modalities.
+
+## Abstract
+Chest X-ray imaging is a widely accessible and non-invasive diagnostic tool for detecting thoracic abnormalities. While numerous AI models assist radiologists in interpreting these images, most overlook patients' historical data. To bridge this gap, we introduce Temporal MIMIC dataset, which integrates five years of patient history, including radiographic scans and reports from MIMIC-CXR and MIMIC-IV, encompassing 12,221 patients and thirteen pathologies. Building on this, we present HIST-AID, a framework that enhances automatic diagnostic accuracy using historical reports. HIST-AID emulates the radiologist's comprehensive approach, leveraging historical data to improve diagnostic accuracy. Our experiments demonstrate significant improvements, with AUROC increasing by 6.56% and AUPRC by 9.51% compared to models that rely solely on radiographic scans. These gains were consistently observed across diverse demographic groups, including variations in gender, age, and racial categories. We show that while recent data boost performance, older data may reduce accuracy due to changes in patient conditions. Our work paves the potential of incorporating historical data for more reliable automatic diagnosis, providing critical support for clinical decision-making.
 
 ## Dependencies
 Check requirements.txt for dependencies of this repository or install them by running
@@ -31,4 +38,12 @@ with text maximum length to be 50 (--text_max_len 50) and image maximum length t
 See arguments in train.py for all argument options.
 
 ## Reference
-Haoxu Huang, Cem M. Deniz, Kyunghyun Cho, Sumit Chopra, Divyam Madaan. "HIST-AID: Leveraging Historical Patient Reports for Enhanced Multi-Modal Automated Diagnosis". In Proceedings of Machine Learning for Health, Vancouver, BC, Canada, 2024
+If you find this work useful, please cite:
+
+```bibtex
+@inproceedings{huang2024hist,
+  title={HIST-AID: Leveraging Historical Patient Reports for Enhanced Multi-Modal Automated Diagnosis},
+  author={Haoxu Huang, Cem M. Deniz, Kyunghyun Cho, Sumit Chopra, Divyam Madaan},
+  booktitle={Proceedings of Machine Learning for Health},
+  year={2024}
+```
