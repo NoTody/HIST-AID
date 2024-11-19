@@ -47,3 +47,15 @@ If you find this work useful, please cite:
   booktitle={Proceedings of Machine Learning for Health},
   year={2024}
 ```
+or our preprint
+```bibtex
+@misc{huang2024hist,
+      title={HIST-AID: Leveraging Historical Patient Reports for Enhanced Multi-Modal Automatic Diagnosis}, 
+      author={Haoxu Huang and Cem M. Deniz and Kyunghyun Cho and Sumit Chopra and Divyam Madaan},
+      year={2024},
+      eprint={2411.10684},
+      archivePrefix={arXiv},
+      primaryClass={eess.IV},
+      url={https://arxiv.org/abs/2411.10684}, 
+}
+```
