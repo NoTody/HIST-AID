@@ -6,7 +6,7 @@
 This repository contains code for generating time-series radiology images and reports data by linking MIMIC-CXR and 
 MIMIC-IV with train/evaluation code for aggregating and fusing representations from both modalities.
 
-<embed src="images/model.pdf" type="application/pdf" width="100%" height="600px" />
+![alt text](https://github.com/NoTody/HIST-AID/blob/main/images/model.pdf?raw=true)
 
 ## Abstract
 Chest X-ray imaging is a widely accessible and non-invasive diagnostic tool for detecting thoracic abnormalities. While numerous AI models assist radiologists in interpreting these images, most overlook patients' historical data. To bridge this gap, we introduce Temporal MIMIC dataset, which integrates five years of patient history, including radiographic scans and reports from MIMIC-CXR and MIMIC-IV, encompassing 12,221 patients and thirteen pathologies. Building on this, we present HIST-AID, a framework that enhances automatic diagnostic accuracy using historical reports. HIST-AID emulates the radiologist's comprehensive approach, leveraging historical data to improve diagnostic accuracy. Our experiments demonstrate significant improvements, with AUROC increasing by 6.56% and AUPRC by 9.51% compared to models that rely solely on radiographic scans. These gains were consistently observed across diverse demographic groups, including variations in gender, age, and racial categories. We show that while recent data boost performance, older data may reduce accuracy due to changes in patient conditions. Our work paves the potential of incorporating historical data for more reliable automatic diagnosis, providing critical support for clinical decision-making.
